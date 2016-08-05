@@ -85,10 +85,3 @@ TEST(stat_cmd, existing_threads) {
 TEST(stat_cmd, no_monitored_threads) {
   ASSERT_FALSE(StatCmd()->Run({""}));
 }
-
-TEST(stat_cmd, cpu_option) {
-  ASSERT_TRUE(StatCmd()->Run({"--cpu", "0", "sleep", "1"}));
-  if (IsRoot()) {
-    ASSERT_TRUE(StatCmd()->Run({"--cpu", "0", "-a", "sleep", "1"}));
-  }
-}
