@@ -31,6 +31,7 @@
 #include <android-base/logging.h>
 #include <android-base/stringprintf.h>
 
+#include "environment.h"
 #include "event_type.h"
 #include "perf_event.h"
 #include "utils.h"
@@ -44,13 +45,20 @@ static int perf_event_open(perf_event_attr* attr, pid_t pid, int cpu, int group_
 
 std::unique_ptr<EventFd> EventFd::OpenEventFile(const perf_event_attr& attr, pid_t tid, int cpu,
                                                 bool report_error) {
-  perf_event_attr perf_attr = attr;
   std::string event_name = "unknown event";
-  const EventType* event_type = FindEventTypeByConfig(perf_attr.type, perf_attr.config);
+  const EventType* event_type = FindEventTypeByConfig(attr.type, attr.config);
   if (event_type != nullptr) {
     event_name = event_type->name;
   }
-  int perf_event_fd = perf_event_open(&perf_attr, tid, cpu, -1, 0);
+  perf_event_attr real_attr = attr;
+  if (attr.freq) {
+    uint64_t max_sample_freq;
+    if (GetMaxSampleFrequency(&max_sample_freq) && max_sample_freq < attr.sample_freq) {
+      PLOG(INFO) << "Adjust sample freq to max allowed sample freq " << max_sample_freq;
+      real_attr.sample_freq = max_sample_freq;
+    }
+  }
+  int perf_event_fd = perf_event_open(&real_attr, tid, cpu, -1, 0);
   if (perf_event_fd == -1) {
     if (report_error) {
       PLOG(ERROR) << "open perf_event_file (event " << event_name << ", tid " << tid << ", cpu "
