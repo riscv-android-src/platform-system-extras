@@ -211,7 +211,7 @@ class SlabSampleTreeBuilder
     return nullptr;
   }
 
-  SlabSample* CreateCallChainSample(const ThreadEntry*,
+  SlabSample* CreateCallChainSample(
       const SlabSample* sample, uint64_t ip, bool in_kernel,
       const std::vector<SlabSample*>& callchain,
       const SlabAccumulateInfo& acc_info) override {

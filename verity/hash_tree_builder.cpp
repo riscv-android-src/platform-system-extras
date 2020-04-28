@@ -197,9 +197,7 @@ bool HashTreeBuilder::Update(const unsigned char* data, size_t len) {
       return false;
     }
     leftover_.clear();
-    if (data != nullptr) {
-      data += append_len;
-    }
+    data += append_len;
     len -= append_len;
   }
   if (len % block_size_ != 0) {

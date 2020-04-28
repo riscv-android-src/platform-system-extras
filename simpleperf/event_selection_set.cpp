@@ -23,15 +23,12 @@
 #include <android-base/logging.h>
 
 #include "environment.h"
-#include "ETMRecorder.h"
 #include "event_attr.h"
 #include "event_type.h"
 #include "IOEventLoop.h"
 #include "perf_regs.h"
 #include "utils.h"
 #include "RecordReadThread.h"
-
-using namespace simpleperf;
 
 bool IsBranchSamplingSupported() {
   const EventType* type = FindEventTypeByName("cpu-cycles");
@@ -162,23 +159,11 @@ bool EventSelectionSet::BuildAndCheckEventSelection(const std::string& event_nam
   selection->event_attr.exclude_host = event_type->exclude_host;
   selection->event_attr.exclude_guest = event_type->exclude_guest;
   selection->event_attr.precise_ip = event_type->precise_ip;
-  if (IsEtmEventType(event_type->event_type.type)) {
-    auto& etm_recorder = ETMRecorder::GetInstance();
-    if (!etm_recorder.CheckEtmSupport()) {
-      return false;
-    }
-    ETMRecorder::GetInstance().SetEtmPerfEventAttr(&selection->event_attr);
-  }
   bool set_default_sample_freq = false;
   if (!for_stat_cmd_) {
     if (event_type->event_type.type == PERF_TYPE_TRACEPOINT) {
       selection->event_attr.freq = 0;
       selection->event_attr.sample_period = DEFAULT_SAMPLE_PERIOD_FOR_TRACEPOINT_EVENT;
-    } else if (IsEtmEventType(event_type->event_type.type)) {
-      // ETM recording has no sample frequency to adjust. Using sample frequency only wastes time
-      // enabling/disabling etm devices. So don't adjust frequency by default.
-      selection->event_attr.freq = 0;
-      selection->event_attr.sample_period = 1;
     } else {
       selection->event_attr.freq = 1;
       // Set default sample freq here may print msg "Adjust sample freq to max allowed sample
@@ -232,9 +217,6 @@ bool EventSelectionSet::AddEventGroup(
     EventSelection selection;
     if (!BuildAndCheckEventSelection(event_name, first_event, &selection)) {
       return false;
-    }
-    if (IsEtmEventType(selection.event_attr.type)) {
-      has_aux_trace_ = true;
     }
     first_event = false;
     group.push_back(std::move(selection));
@@ -570,7 +552,7 @@ bool EventSelectionSet::OpenEventFiles(const std::vector<int>& on_cpus) {
       }
     }
   }
-  return ApplyFilters();
+  return true;
 }
 
 bool EventSelectionSet::IsUserSpaceSamplerGroup(EventSelectionGroup& group) {
@@ -590,47 +572,6 @@ bool EventSelectionSet::OpenUserSpaceSamplersOnGroup(EventSelectionGroup& group,
           return false;
         }
         selection.inplace_samplers.push_back(std::move(sampler));
-      }
-    }
-  }
-  return true;
-}
-
-bool EventSelectionSet::ApplyFilters() {
-  if (include_filters_.empty()) {
-    return true;
-  }
-  if (!has_aux_trace_) {
-    LOG(ERROR) << "include filters only take effect in cs-etm instruction tracing";
-    return false;
-  }
-  size_t supported_pairs = ETMRecorder::GetInstance().GetAddrFilterPairs();
-  if (supported_pairs < include_filters_.size()) {
-    LOG(ERROR) << "filter binary count is " << include_filters_.size()
-               << ", bigger than maximum supported filters on device, which is " << supported_pairs;
-    return false;
-  }
-  std::string filter_str;
-  for (auto& binary : include_filters_) {
-    std::string path;
-    if (!android::base::Realpath(binary, &path)) {
-      PLOG(ERROR) << "failed to find include filter binary: " << binary;
-      return false;
-    }
-    uint64_t file_size = GetFileSize(path);
-    if (!filter_str.empty()) {
-      filter_str += ',';
-    }
-    android::base::StringAppendF(&filter_str, "filter 0/%" PRIu64 "@%s", file_size, path.c_str());
-  }
-  for (auto& group : groups_) {
-    for (auto& selection : group) {
-      if (IsEtmEventType(selection.event_type_modifier.event_type.type)) {
-        for (auto& event_fd : selection.event_fds) {
-          if (!event_fd->SetFilter(filter_str)) {
-            return false;
-          }
-        }
       }
     }
   }
@@ -669,11 +610,9 @@ bool EventSelectionSet::ReadCounters(std::vector<CountersInfo>* counters) {
 }
 
 bool EventSelectionSet::MmapEventFiles(size_t min_mmap_pages, size_t max_mmap_pages,
-                                       size_t aux_buffer_size, size_t record_buffer_size,
-                                       bool allow_cutting_samples) {
-  record_read_thread_.reset(
-      new simpleperf::RecordReadThread(record_buffer_size, groups_[0][0].event_attr, min_mmap_pages,
-                                       max_mmap_pages, aux_buffer_size, allow_cutting_samples));
+                                       size_t record_buffer_size) {
+  record_read_thread_.reset(new simpleperf::RecordReadThread(
+      record_buffer_size, groups_[0][0].event_attr, min_mmap_pages, max_mmap_pages));
   return true;
 }
 
@@ -763,6 +702,11 @@ bool EventSelectionSet::FinishReadMmapEventData() {
     return false;
   }
   return loop_->RunLoop();
+}
+
+void EventSelectionSet::GetLostRecords(size_t* lost_samples, size_t* lost_non_samples,
+                                       size_t* cut_stack_samples) {
+  record_read_thread_->GetLostRecords(lost_samples, lost_non_samples, cut_stack_samples);
 }
 
 bool EventSelectionSet::HandleCpuHotplugEvents(const std::vector<int>& monitored_cpus,

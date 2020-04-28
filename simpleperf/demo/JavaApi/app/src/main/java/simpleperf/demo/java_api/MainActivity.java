@@ -28,8 +28,6 @@ public class MainActivity extends AppCompatActivity {
 
     TextView textView;
 
-    static boolean threadsStarted = false;
-
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -37,11 +35,8 @@ public class MainActivity extends AppCompatActivity {
 
         textView = (TextView) findViewById(R.id.textView);
 
-        if (!threadsStarted) {
-            threadsStarted = true;
-            Thread profileThread = createProfileThread();
-            createBusyThread(profileThread);
-        }
+        Thread profileThread = createProfileThread();
+        createBusyThread(profileThread);
     }
 
     Thread createProfileThread() {

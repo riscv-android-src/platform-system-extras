@@ -34,8 +34,7 @@ SIMPLEPERF_SCRIPT_LIST := \
     testdata/perf_with_symbols.data \
     testdata/perf_with_trace_offcpu.data \
     testdata/perf_with_tracepoint_event.data \
-    testdata/perf_with_interpreter_frames.data \
-    $(call all-named-files-under,*,app_api)
+    testdata/perf_with_interpreter_frames.data
 
 SIMPLEPERF_SCRIPT_LIST := $(addprefix -f $(LOCAL_PATH)/,$(SIMPLEPERF_SCRIPT_LIST))
 
@@ -45,4 +44,4 @@ SIMPLEPERF_SCRIPT_PATH := \
 $(SIMPLEPERF_SCRIPT_PATH) : $(SOONG_ZIP)
 	$(hide) $(SOONG_ZIP) -d -o $@ -C system/extras/simpleperf $(SIMPLEPERF_SCRIPT_LIST)
 
-$(call dist-for-goals,simpleperf,$(SIMPLEPERF_SCRIPT_PATH):simpleperf/simpleperf_script.zip)
+$(call dist-for-goals,sdk win_sdk,$(SIMPLEPERF_SCRIPT_PATH):simpleperf/simpleperf_script.zip)

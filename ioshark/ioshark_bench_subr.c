@@ -22,7 +22,7 @@
 #include <signal.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <errno.h>
+#include <sys/errno.h>
 #include <fcntl.h>
 #include <string.h>
 #include <assert.h>
@@ -121,9 +121,10 @@ files_db_fsync_discard_files(void *handle)
 					  openflags);
 				if (fd < 0) {
 					fprintf(stderr,
-						"%s: open(%s %x): %m\n",
+						"%s: open(%s %x) error %d\n",
 						progname, db_node->filename,
-						openflags);
+						openflags,
+						errno);
 					exit(EXIT_FAILURE);
 				}
 				db_node->fd = fd;
@@ -206,8 +207,9 @@ files_db_unlink_files(void *handle)
 			db_node->fd = -1;
 			if (is_readonly_mount(db_node->filename, db_node->size) == 0) {
 				if (unlink(db_node->filename) < 0) {
-					fprintf(stderr, "%s: Cannot unlink %s: %m\n",
-						__func__, db_node->filename);
+					fprintf(stderr, "%s: Cannot unlink %s:%s\n",
+						__func__, db_node->filename,
+						strerror(errno));
 					exit(EXIT_FAILURE);
 				}
 			}
@@ -276,7 +278,8 @@ create_file(char *path, size_t size, struct rw_bytes_s *rw_bytes)
 
 	fd = open(path, O_WRONLY|O_CREAT|O_TRUNC, 0644);
 	if (fd < 0) {
-		fprintf(stderr, "%s Cannot create file %s: %m\n", progname, path);
+		fprintf(stderr, "%s Cannot create file %s, error = %d\n",
+			progname, path, errno);
 		exit(EXIT_FAILURE);
 	}
 	while (size > 0) {
@@ -284,7 +287,8 @@ create_file(char *path, size_t size, struct rw_bytes_s *rw_bytes)
 		buf = get_buf(&buf, &buflen, n, 1);
 		if (write(fd, buf, n) < n) {
 			fprintf(stderr,
-				"%s Cannot write file %s: %m\n", progname, path);
+				"%s Cannot write file %s, error = %d\n",
+				progname, path, errno);
 			free(buf);
 			exit(EXIT_FAILURE);
 		}
@@ -293,12 +297,14 @@ create_file(char *path, size_t size, struct rw_bytes_s *rw_bytes)
 	}
 	free(buf);
 	if (fsync(fd) < 0) {
-		fprintf(stderr, "%s Cannot fsync file %s: %m\n", progname, path);
+		fprintf(stderr, "%s Cannot fsync file %s, error = %d\n",
+			progname, path, errno);
 		exit(EXIT_FAILURE);
 	}
-	if ((errno = posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED)) != 0) {
+	if (posix_fadvise(fd, 0, 0, POSIX_FADV_DONTNEED) < 0) {
 		fprintf(stderr,
-			"%s Cannot fadvise(DONTNEED) file %s: %m\n", progname, path);
+			"%s Cannot fadvise(DONTNEED) file %s, error = %d\n",
+			progname, path, errno);
 		exit(EXIT_FAILURE);
 	}
 	close(fd);
@@ -602,7 +608,8 @@ init_filename_cache(void)
 			      MAP_SHARED | MAP_LOCKED | MAP_POPULATE,
 			      fd, 0);
 	if (filename_cache == MAP_FAILED) {
-		fprintf(stderr, "%s Can't fstat ioshark_filenames file: %m\n", progname);
+		fprintf(stderr, "%s Can't fstat ioshark_filenames file: %s\n",
+			progname, strerror(errno));
 		exit(EXIT_FAILURE);
 	}
 	close(fd);

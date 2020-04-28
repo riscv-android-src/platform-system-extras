@@ -69,7 +69,7 @@ struct ThreadEntry {
   int pid;
   int tid;
   const char* comm;  // It always refers to the latest comm.
-  std::shared_ptr<MapSet> maps;  // maps is shared by threads in the same process.
+  MapSet* maps;
 };
 
 // ThreadTree contains thread information (in ThreadEntry) and mmap information
@@ -92,9 +92,7 @@ class ThreadTree {
 
   void SetThreadName(int pid, int tid, const std::string& comm);
   void ForkThread(int pid, int tid, int ppid, int ptid);
-  ThreadEntry* FindThread(int tid);
   ThreadEntry* FindThreadOrNew(int pid, int tid);
-  void ExitThread(int pid, int tid);
   void AddKernelMap(uint64_t start_addr, uint64_t len, uint64_t pgoff,
                     const std::string& filename);
   void AddThreadMap(int pid, int tid, uint64_t start_addr, uint64_t len,
@@ -127,6 +125,7 @@ class ThreadTree {
   void Update(const Record& record);
 
   std::vector<Dso*> GetAllDsos() const;
+  std::vector<const ThreadEntry*> GetAllThreads() const;
 
  private:
   ThreadEntry* CreateThread(int pid, int tid);
@@ -139,6 +138,7 @@ class ThreadTree {
   std::unordered_map<int, std::unique_ptr<ThreadEntry>> thread_tree_;
   std::vector<std::unique_ptr<std::string>> thread_comm_storage_;
 
+  std::vector<std::unique_ptr<MapSet>> map_set_storage_;
   MapSet kernel_maps_;
   std::vector<std::unique_ptr<MapEntry>> map_storage_;
   MapEntry unknown_map_;

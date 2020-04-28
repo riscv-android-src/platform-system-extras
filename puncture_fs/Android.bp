@@ -15,7 +15,7 @@
 cc_binary {
     name: "puncture_fs",
 
-    srcs: ["puncture_fs.cpp"],
+    srcs: ["puncture_fs.c"],
     cflags: [
         "-Wall",
         "-Werror",

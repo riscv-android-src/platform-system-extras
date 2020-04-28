@@ -32,7 +32,10 @@
 #include "IOEventLoop.h"
 #include "perf_event.h"
 #include "record.h"
-#include "RecordReadThread.h"
+
+namespace simpleperf {
+  class RecordReadThread;
+}
 
 constexpr double DEFAULT_PERIOD_TO_DETECT_CPU_HOTPLUG_EVENTS_IN_SEC = 0.5;
 constexpr double DEFAULT_PERIOD_TO_CHECK_MONITORED_TARGETS_IN_SEC = 1;
@@ -93,7 +96,6 @@ class EventSelectionSet {
   std::vector<const EventType*> GetEvents() const;
   std::vector<const EventType*> GetTracepointEvents() const;
   bool ExcludeKernel() const;
-  bool HasAuxTrace() const { return has_aux_trace_; }
   bool HasInplaceSampler() const;
   std::vector<EventAttrWithId> GetEventAttrWithId() const;
 
@@ -109,9 +111,6 @@ class EventSelectionSet {
   bool NeedKernelSymbol() const;
   void SetRecordNotExecutableMaps(bool record);
   bool RecordNotExecutableMaps() const;
-  void SetIncludeFilters(std::vector<std::string>&& filters) {
-    include_filters_ = std::move(filters);
-  }
 
   void AddMonitoredProcesses(const std::set<pid_t>& processes) {
     processes_.insert(processes.begin(), processes.end());
@@ -135,15 +134,11 @@ class EventSelectionSet {
 
   bool OpenEventFiles(const std::vector<int>& on_cpus);
   bool ReadCounters(std::vector<CountersInfo>* counters);
-  bool MmapEventFiles(size_t min_mmap_pages, size_t max_mmap_pages, size_t aux_buffer_size,
-                      size_t record_buffer_size, bool allow_cutting_samples);
+  bool MmapEventFiles(size_t min_mmap_pages, size_t max_mmap_pages, size_t record_buffer_size);
   bool PrepareToReadMmapEventData(const std::function<bool(Record*)>& callback);
   bool SyncKernelBuffer();
   bool FinishReadMmapEventData();
-
-  const simpleperf::RecordStat& GetRecordStat() {
-    return record_read_thread_->GetStat();
-  }
+  void GetLostRecords(size_t* lost_samples, size_t* lost_non_samples, size_t* cut_stack_samples);
 
   // If monitored_cpus is empty, monitor all cpus.
   bool HandleCpuHotplugEvents(const std::vector<int>& monitored_cpus,
@@ -175,7 +170,6 @@ class EventSelectionSet {
                                     const std::map<pid_t, std::set<pid_t>>& process_map);
   bool OpenEventFilesOnGroup(EventSelectionGroup& group, pid_t tid, int cpu,
                              std::string* failed_event_type);
-  bool ApplyFilters();
   bool ReadMmapEventData(bool with_time_limit);
 
   bool DetectCpuHotplugEvents();
@@ -198,9 +192,6 @@ class EventSelectionSet {
   std::vector<int> online_cpus_;
 
   std::unique_ptr<simpleperf::RecordReadThread> record_read_thread_;
-
-  bool has_aux_trace_ = false;
-  std::vector<std::string> include_filters_;
 
   DISALLOW_COPY_AND_ASSIGN(EventSelectionSet);
 };

@@ -17,45 +17,24 @@
 #ifndef _FSCRYPT_H_
 #define _FSCRYPT_H_
 
-#include <string>
+#include <sys/cdefs.h>
+#include <stdbool.h>
+#include <cutils/multiuser.h>
 
-// TODO: switch to <linux/fscrypt.h> once it's in Bionic
-#define FSCRYPT_POLICY_FLAG_IV_INO_LBLK_64 0x08
+__BEGIN_DECLS
 
 bool fscrypt_is_native();
+
+int fscrypt_policy_ensure(const char *directory, const char *policy,
+                          size_t policy_length,
+                          const char *contents_encryption_mode,
+                          const char *filenames_encryption_mode);
 
 static const char* fscrypt_unencrypted_folder = "/unencrypted";
 static const char* fscrypt_key_ref = "/unencrypted/ref";
 static const char* fscrypt_key_per_boot_ref = "/unencrypted/per_boot_ref";
 static const char* fscrypt_key_mode = "/unencrypted/mode";
 
-namespace android {
-namespace fscrypt {
-
-struct EncryptionOptions {
-    int version;
-    int contents_mode;
-    int filenames_mode;
-    int flags;
-
-    // Ensure that "version" is not valid on creation and so must be explicitly set
-    EncryptionOptions() : version(0) {}
-};
-
-struct EncryptionPolicy {
-    EncryptionOptions options;
-    std::string key_raw_ref;
-};
-
-void BytesToHex(const std::string& bytes, std::string* hex);
-
-bool OptionsToString(const EncryptionOptions& options, std::string* options_string);
-
-bool ParseOptions(const std::string& options_string, EncryptionOptions* options);
-
-bool EnsurePolicy(const EncryptionPolicy& policy, const std::string& directory);
-
-}  // namespace fscrypt
-}  // namespace android
+__END_DECLS
 
 #endif // _FSCRYPT_H_

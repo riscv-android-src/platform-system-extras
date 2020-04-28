@@ -25,8 +25,6 @@
 #include <android-base/strings.h>
 
 #include "command.h"
-#include "dso.h"
-#include "ETMDecoder.h"
 #include "event_attr.h"
 #include "event_type.h"
 #include "perf_regs.h"
@@ -35,19 +33,15 @@
 #include "utils.h"
 
 using namespace PerfFileFormat;
-using namespace simpleperf;
 
 class DumpRecordCommand : public Command {
  public:
   DumpRecordCommand()
       : Command("dump", "dump perf record file",
-                // clang-format off
-"Usage: simpleperf dumprecord [options] [perf_record_file]\n"
-"    Dump different parts of a perf record file. Default file is perf.data.\n"
-"--dump-etm type1,type2,...   Dump etm data. A type is one of raw, packet and element.\n"
-"--symdir <dir>               Look for binaries in a directory recursively.\n"
-                // clang-format on
-      ) {}
+                "Usage: simpleperf dumprecord [options] [perf_record_file]\n"
+                "    Dump different parts of a perf record file. Default file is perf.data.\n"),
+        record_filename_("perf.data"), record_file_arch_(GetBuildArch()) {
+  }
 
   bool Run(const std::vector<std::string>& args);
 
@@ -56,12 +50,11 @@ class DumpRecordCommand : public Command {
   void DumpFileHeader();
   void DumpAttrSection();
   bool DumpDataSection();
-  bool DumpAuxData(const AuxRecord& aux, ETMDecoder& etm_decoder);
   bool DumpFeatureSection();
 
-  std::string record_filename_ = "perf.data";
+  std::string record_filename_;
   std::unique_ptr<RecordFileReader> record_file_reader_;
-  ETMDumpOption etm_dump_option_;
+  ArchType record_file_arch_;
 };
 
 bool DumpRecordCommand::Run(const std::vector<std::string>& args) {
@@ -72,6 +65,25 @@ bool DumpRecordCommand::Run(const std::vector<std::string>& args) {
   if (record_file_reader_ == nullptr) {
     return false;
   }
+  std::string arch = record_file_reader_->ReadFeatureString(FEAT_ARCH);
+  if (!arch.empty()) {
+    record_file_arch_ = GetArchType(arch);
+    if (record_file_arch_ == ARCH_UNSUPPORTED) {
+      return false;
+    }
+  }
+  ScopedCurrentArch scoped_arch(record_file_arch_);
+  std::unique_ptr<ScopedEventTypes> scoped_event_types;
+  if (record_file_reader_->HasFeature(PerfFileFormat::FEAT_META_INFO)) {
+    std::unordered_map<std::string, std::string> meta_info;
+    if (!record_file_reader_->ReadMetaInfoFeature(&meta_info)) {
+      return false;
+    }
+    auto it = meta_info.find("event_type_info");
+    if (it != meta_info.end()) {
+      scoped_event_types.reset(new ScopedEventTypes(it->second));
+    }
+  }
   DumpFileHeader();
   DumpAttrSection();
   if (!DumpDataSection()) {
@@ -81,30 +93,11 @@ bool DumpRecordCommand::Run(const std::vector<std::string>& args) {
 }
 
 bool DumpRecordCommand::ParseOptions(const std::vector<std::string>& args) {
-  size_t i;
-  for (i = 0; i < args.size() && !args[i].empty() && args[i][0] == '-'; ++i) {
-    if (args[i] == "--dump-etm") {
-      if (!NextArgumentOrError(args, &i) || !ParseEtmDumpOption(args[i], &etm_dump_option_)) {
-        return false;
-      }
-    } else if (args[i] == "--symdir") {
-      if (!NextArgumentOrError(args, &i)) {
-        return false;
-      }
-      if (!Dso::AddSymbolDir(args[i])) {
-        return false;
-      }
-    } else {
-      ReportUnknownOption(args, i);
-      return false;
-    }
-  }
-  if (i + 1 < args.size()) {
-    LOG(ERROR) << "too many record files";
+  if (args.size() == 1) {
+    record_filename_ = args[0];
+  } else if (args.size() > 1) {
+    ReportUnknownOption(args, 1);
     return false;
-  }
-  if (i + 1 == args.size()) {
-    record_filename_ = args[i];
   }
   return true;
 }
@@ -168,7 +161,6 @@ void DumpRecordCommand::DumpAttrSection() {
 }
 
 bool DumpRecordCommand::DumpDataSection() {
-  std::unique_ptr<ETMDecoder> etm_decoder;
   ThreadTree thread_tree;
   thread_tree.ShowIpForUnknownSymbol();
   record_file_reader_->LoadBuildIdAndFileFeatures(thread_tree);
@@ -220,31 +212,10 @@ bool DumpRecordCommand::DumpDataSection() {
         PrintIndented(2, "%s (%s[+%" PRIx64 "])\n", symbol_name.c_str(), dso_name.c_str(),
                       vaddr_in_file);
       }
-    } else if (r->type() == PERF_RECORD_AUXTRACE_INFO) {
-      etm_decoder = ETMDecoder::Create(*static_cast<AuxTraceInfoRecord*>(r.get()), thread_tree);
-      if (!etm_decoder) {
-        return false;
-      }
-      etm_decoder->EnableDump(etm_dump_option_);
-    } else if (r->type() == PERF_RECORD_AUX) {
-      CHECK(etm_decoder);
-      return DumpAuxData(*static_cast<AuxRecord*>(r.get()), *etm_decoder);
     }
     return true;
   };
   return record_file_reader_->ReadDataSection(record_callback);
-}
-
-bool DumpRecordCommand::DumpAuxData(const AuxRecord& aux, ETMDecoder& etm_decoder) {
-  size_t size = aux.data->aux_size;
-  if (size > 0) {
-    std::unique_ptr<uint8_t[]> data(new uint8_t[size]);
-    if (!record_file_reader_->ReadAuxData(aux.Cpu(), aux.data->aux_offset, data.get(), size)) {
-      return false;
-    }
-    return etm_decoder.ProcessData(data.get(), size);
-  }
-  return true;
 }
 
 bool DumpRecordCommand::DumpFeatureSection() {
@@ -297,14 +268,13 @@ bool DumpRecordCommand::DumpFeatureSection() {
         }
       }
     } else if (feature == FEAT_META_INFO) {
-      PrintIndented(1, "meta_info:\n");
-      for (auto& pair : record_file_reader_->GetMetaInfoFeature()) {
-        PrintIndented(2, "%s = %s\n", pair.first.c_str(), pair.second.c_str());
+      std::unordered_map<std::string, std::string> info_map;
+      if (!record_file_reader_->ReadMetaInfoFeature(&info_map)) {
+        return false;
       }
-    } else if (feature == FEAT_AUXTRACE) {
-      PrintIndented(1, "file_offsets_of_auxtrace_records:\n");
-      for (auto offset : record_file_reader_->ReadAuxTraceFeature()) {
-        PrintIndented(2, "%" PRIu64 "\n", offset);
+      PrintIndented(1, "meta_info:\n");
+      for (auto& pair : info_map) {
+        PrintIndented(2, "%s = %s\n", pair.first.c_str(), pair.second.c_str());
       }
     }
   }

@@ -62,8 +62,7 @@ struct SampleEntry {
   // accumuated when appearing in other sample's callchain
   uint64_t accumulated_period;
   uint64_t sample_count;
-  pid_t pid;
-  pid_t tid;
+  const ThreadEntry* thread;
   const char* thread_comm;
   const MapEntry* map;
   const Symbol* symbol;
@@ -79,8 +78,7 @@ struct SampleEntry {
         period(period),
         accumulated_period(accumulated_period),
         sample_count(sample_count),
-        pid(thread->pid),
-        tid(thread->tid),
+        thread(thread),
         thread_comm(thread->comm),
         map(map),
         symbol(symbol),
@@ -185,10 +183,11 @@ class ReportCmdSampleTreeBuilder : public SampleTreeBuilder<SampleEntry, uint64_
     return InsertSample(std::move(sample));
   }
 
-  SampleEntry* CreateCallChainSample(const ThreadEntry* thread, const SampleEntry* sample,
-                                     uint64_t ip, bool in_kernel,
+  SampleEntry* CreateCallChainSample(const SampleEntry* sample, uint64_t ip,
+                                     bool in_kernel,
                                      const std::vector<SampleEntry*>& callchain,
                                      const uint64_t& acc_info) override {
+    const ThreadEntry* thread = sample->thread;
     const MapEntry* map = thread_tree_->FindMap(thread, ip, in_kernel);
     if (thread_tree_->IsUnknownDso(map->dso)) {
       // The unwinders can give wrong ip addresses, which can't map to a valid dso. Skip them.
@@ -204,7 +203,7 @@ class ReportCmdSampleTreeBuilder : public SampleTreeBuilder<SampleEntry, uint64_
   }
 
   const ThreadEntry* GetThreadOfSample(SampleEntry* sample) override {
-    return thread_tree_->FindThreadOrNew(sample->pid, sample->tid);
+    return sample->thread;
   }
 
   uint64_t GetPeriodForCallChain(const uint64_t& acc_info) override {
@@ -213,11 +212,11 @@ class ReportCmdSampleTreeBuilder : public SampleTreeBuilder<SampleEntry, uint64_
 
   bool FilterSample(const SampleEntry* sample) override {
     if (!pid_filter_.empty() &&
-        pid_filter_.find(sample->pid) == pid_filter_.end()) {
+        pid_filter_.find(sample->thread->pid) == pid_filter_.end()) {
       return false;
     }
     if (!tid_filter_.empty() &&
-        tid_filter_.find(sample->tid) == tid_filter_.end()) {
+        tid_filter_.find(sample->thread->tid) == tid_filter_.end()) {
       return false;
     }
     if (!comm_filter_.empty() &&
@@ -432,7 +431,7 @@ class ReportCommand : public Command {
 
  private:
   bool ParseOptions(const std::vector<std::string>& args);
-  void ReadMetaInfoFromRecordFile();
+  bool ReadMetaInfoFromRecordFile();
   bool ReadEventAttrFromRecordFile();
   bool ReadFeaturesFromRecordFile();
   bool ReadSampleTreeFromRecordFile();
@@ -468,6 +467,8 @@ class ReportCommand : public Command {
   size_t sched_switch_attr_id_;
 
   std::string report_filename_;
+  std::unordered_map<std::string, std::string> meta_info_;
+  std::unique_ptr<ScopedEventTypes> scoped_event_types_;
 };
 
 bool ReportCommand::Run(const std::vector<std::string>& args) {
@@ -481,7 +482,9 @@ bool ReportCommand::Run(const std::vector<std::string>& args) {
   if (record_file_reader_ == nullptr) {
     return false;
   }
-  ReadMetaInfoFromRecordFile();
+  if (!ReadMetaInfoFromRecordFile()) {
+    return false;
+  }
   if (!ReadEventAttrFromRecordFile()) {
     return false;
   }
@@ -731,14 +734,25 @@ bool ReportCommand::ParseOptions(const std::vector<std::string>& args) {
   return true;
 }
 
-void ReportCommand::ReadMetaInfoFromRecordFile() {
-  auto& meta_info = record_file_reader_->GetMetaInfoFeature();
-  if (auto it = meta_info.find("system_wide_collection"); it != meta_info.end()) {
-    system_wide_collection_ = it->second == "true";
+bool ReportCommand::ReadMetaInfoFromRecordFile() {
+  if (record_file_reader_->HasFeature(PerfFileFormat::FEAT_META_INFO)) {
+    if (!record_file_reader_->ReadMetaInfoFeature(&meta_info_)) {
+      return false;
+    }
+    auto it = meta_info_.find("system_wide_collection");
+    if (it != meta_info_.end()) {
+      system_wide_collection_ = it->second == "true";
+    }
+    it = meta_info_.find("trace_offcpu");
+    if (it != meta_info_.end()) {
+      trace_offcpu_ = it->second == "true";
+    }
+    it = meta_info_.find("event_type_info");
+    if (it != meta_info_.end()) {
+      scoped_event_types_.reset(new ScopedEventTypes(it->second));
+    }
   }
-  if (auto it = meta_info.find("trace_offcpu"); it != meta_info.end()) {
-    trace_offcpu_ = it->second == "true";
-  }
+  return true;
 }
 
 bool ReportCommand::ReadEventAttrFromRecordFile() {
@@ -791,7 +805,7 @@ bool ReportCommand::ReadFeaturesFromRecordFile() {
   std::vector<std::string> cmdline = record_file_reader_->ReadCmdlineFeature();
   if (!cmdline.empty()) {
     record_cmdline_ = android::base::Join(cmdline, ' ');
-    if (record_file_reader_->GetMetaInfoFeature().count("system_wide_collection")) {
+    if (meta_info_.find("system_wide_collection") == meta_info_.end()) {
       // TODO: the code to detect system wide collection option is fragile, remove
       // it once we can do cross unwinding.
       for (size_t i = 0; i < cmdline.size(); i++) {

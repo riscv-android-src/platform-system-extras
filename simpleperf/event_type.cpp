@@ -28,11 +28,8 @@
 #include <android-base/stringprintf.h>
 #include <android-base/strings.h>
 
-#include "ETMRecorder.h"
 #include "event_attr.h"
 #include "utils.h"
-
-using namespace simpleperf;
 
 #define EVENT_TYPE_TABLE_ENTRY(name, type, config, description, limited_arch) \
           {name, type, config, description, limited_arch},
@@ -42,8 +39,6 @@ static const std::vector<EventType> static_event_type_array = {
 };
 
 static std::string tracepoint_events;
-static std::set<EventType> g_event_types;
-static uint32_t g_etm_event_type;
 
 bool SetTracepointEventsFilePath(const std::string& filepath) {
   if (!android::base::ReadFileToString(filepath, &tracepoint_events)) {
@@ -115,6 +110,8 @@ static std::vector<EventType> GetTracepointEventTypes() {
   return result;
 }
 
+static std::set<EventType> g_event_types;
+
 std::string ScopedEventTypes::BuildString(const std::vector<const EventType*>& event_types) {
   std::string result;
   for (auto type : event_types) {
@@ -129,23 +126,18 @@ std::string ScopedEventTypes::BuildString(const std::vector<const EventType*>& e
 
 ScopedEventTypes::ScopedEventTypes(const std::string& event_type_str) {
   saved_event_types_ = std::move(g_event_types);
-  saved_etm_event_type_ = g_etm_event_type;
   g_event_types.clear();
   for (auto& s : android::base::Split(event_type_str, "\n")) {
     std::string name = s.substr(0, s.find(','));
     uint32_t type;
     uint64_t config;
     sscanf(s.c_str() + name.size(), ",%u,%" PRIu64, &type, &config);
-    if (name == "cs-etm") {
-      g_etm_event_type = type;
-    }
     g_event_types.emplace(name, type, config, "", "");
   }
 }
 
 ScopedEventTypes::~ScopedEventTypes() {
   g_event_types = std::move(saved_event_types_);
-  g_etm_event_type = saved_etm_event_type_;
 }
 
 const std::set<EventType>& GetAllEventTypes() {
@@ -153,13 +145,6 @@ const std::set<EventType>& GetAllEventTypes() {
     g_event_types.insert(static_event_type_array.begin(), static_event_type_array.end());
     std::vector<EventType> tracepoint_array = GetTracepointEventTypes();
     g_event_types.insert(tracepoint_array.begin(), tracepoint_array.end());
-#if defined(__linux__)
-    std::unique_ptr<EventType> etm_type = ETMRecorder::GetInstance().BuildEventType();
-    if (etm_type) {
-      g_etm_event_type = etm_type->type;
-      g_event_types.emplace(std::move(*etm_type));
-    }
-#endif
   }
   return g_event_types;
 }
@@ -258,8 +243,4 @@ std::unique_ptr<EventTypeAndModifier> ParseEventType(const std::string& event_ty
   }
   event_type_modifier->modifier = modifier;
   return event_type_modifier;
-}
-
-bool IsEtmEventType(uint32_t type) {
-  return g_etm_event_type != 0 && type == g_etm_event_type;
 }

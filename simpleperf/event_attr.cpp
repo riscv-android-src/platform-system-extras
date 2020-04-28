@@ -133,7 +133,6 @@ void DumpPerfEventAttr(const perf_event_attr& attr, size_t indent) {
 
   PrintIndented(indent + 1, "sample_id_all %u, exclude_host %u, exclude_guest %u\n",
                 attr.sample_id_all, attr.exclude_host, attr.exclude_guest);
-  PrintIndented(indent + 1, "config2 0x%llx\n", attr.config2);
   PrintIndented(indent + 1, "branch_sample_type 0x%" PRIx64 "\n", attr.branch_sample_type);
   PrintIndented(indent + 1, "exclude_callchain_kernel %u, exclude_callchain_user %u\n",
                 attr.exclude_callchain_kernel, attr.exclude_callchain_user);
@@ -230,10 +229,7 @@ bool IsCpuSupported(const perf_event_attr& attr) {
 
 std::string GetEventNameByAttr(const perf_event_attr& attr) {
   for (const auto& event_type : GetAllEventTypes()) {
-    // An event type uses both type and config value to define itself. But etm event type
-    // only uses type value (whose config value is used to set etm options).
-    if (event_type.type == attr.type &&
-        (event_type.config == attr.config || IsEtmEventType(event_type.type))) {
+    if (event_type.type == attr.type && event_type.config == attr.config) {
       std::string name = event_type.name;
       if (attr.exclude_user && !attr.exclude_kernel) {
         name += ":k";
