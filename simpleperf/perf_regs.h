@@ -22,11 +22,13 @@
 #include <uapi/asm-arm/asm/perf_regs.h>
 #define perf_event_arm_regs perf_event_arm64_regs
 #include <uapi/asm-arm64/asm/perf_regs.h>
+#include <uapi/asm-riscv/asm/perf_regs.h>
 #else
 #include <asm-x86/asm/perf_regs.h>
 #include <asm-arm/asm/perf_regs.h>
 #define perf_event_arm_regs perf_event_arm64_regs
 #include <asm-arm64/asm/perf_regs.h>
+#include <asm-riscv/asm/perf_regs.h>
 #endif
 
 #include <stdint.h>
@@ -40,6 +42,7 @@ enum ArchType {
   ARCH_X86_64,
   ARCH_ARM,
   ARCH_ARM64,
+  ARCH_RISCV64,
   ARCH_UNSUPPORTED,
 };
 
@@ -52,6 +55,8 @@ constexpr ArchType GetBuildArch() {
   return ARCH_ARM64;
 #elif defined(__arm__)
   return ARCH_ARM;
+#elif defined(__riscv) && __riscv_xlen == 64
+  return ARCH_RISCV64;
 #else
   return ARCH_UNSUPPORTED;
 #endif

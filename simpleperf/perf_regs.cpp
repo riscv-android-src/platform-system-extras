@@ -46,6 +46,8 @@ ArchType GetArchType(const std::string& arch) {
       }
     }
     return ARCH_ARM;
+  } else if (arch == "riscv64") {
+    return ARCH_RISCV64;
   }
   LOG(ERROR) << "unsupported arch: " << arch;
   return ARCH_UNSUPPORTED;
@@ -73,6 +75,8 @@ std::string GetArchString(ArchType arch) {
       return "arm64";
     case ARCH_ARM:
       return "arm";
+    case ARCH_RISCV64:
+      return "riscv64";
     default:
       break;
   }
@@ -91,6 +95,8 @@ uint64_t GetSupportedRegMask(ArchType arch) {
       return ((1ULL << PERF_REG_ARM_MAX) - 1);
     case ARCH_ARM64:
       return ((1ULL << PERF_REG_ARM64_MAX) - 1);
+    case ARCH_RISCV64:
+      return ((1ULL << PERF_REG_RISCV_MAX) - 1);
     default:
       return 0;
   }
@@ -113,6 +119,10 @@ static std::unordered_map<size_t, std::string> arm_reg_map = {
 
 static std::unordered_map<size_t, std::string> arm64_reg_map = {
     {PERF_REG_ARM64_LR, "lr"}, {PERF_REG_ARM64_SP, "sp"}, {PERF_REG_ARM64_PC, "pc"},
+};
+
+static std::unordered_map<size_t, std::string> riscv64_reg_map = {
+    {PERF_REG_RISCV_PC, "pc"}, {PERF_REG_RISCV_RA, "ra"}, {PERF_REG_RISCV_SP, "sp"},
 };
 
 std::string GetRegName(size_t regno, ArchType arch) {
@@ -144,6 +154,14 @@ std::string GetRegName(size_t regno, ArchType arch) {
       }
       auto it = arm64_reg_map.find(reg);
       CHECK(it != arm64_reg_map.end()) << "unknown reg " << reg;
+      return it->second;
+    }
+    case ARCH_RISCV64: {
+      if (reg >= PERF_REG_RISCV_GP && reg <= PERF_REG_RISCV_T6) {
+        return android::base::StringPrintf("r%d", reg - PERF_REG_ARM64_X0);
+      }
+      auto it = riscv64_reg_map.find(reg);
+      CHECK(it != riscv64_reg_map.end()) << "unknown reg " << reg;
       return it->second;
     }
     default:
@@ -191,6 +209,9 @@ bool RegSet::GetSpRegValue(uint64_t* value) const {
     case ARCH_ARM64:
       regno = PERF_REG_ARM64_SP;
       break;
+    case ARCH_RISCV64:
+      regno = PERF_REG_RISCV_SP;
+      break;
     default:
       return false;
   }
@@ -209,6 +230,9 @@ bool RegSet::GetIpRegValue(uint64_t* value) const {
       break;
     case ARCH_ARM64:
       regno = PERF_REG_ARM64_PC;
+      break;
+    case ARCH_RISCV64:
+      regno = PERF_REG_RISCV_PC;
       break;
     default:
       return false;
