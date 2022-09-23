@@ -105,7 +105,7 @@ cc_library_static {
     system_shared_libs: [],
     header_libs: ["libc_headers"],
     sanitize: {
-        cfi: false,
+        cfi: true,
         config: {
             cfi_assembly_support: true,
         },
